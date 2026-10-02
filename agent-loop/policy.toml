@@ -1,0 +1,84 @@
+# 루프 정책. 사람이 조정하는 곳이고, 모델은 이 파일을 읽지 않는다.
+# 모델은 태그와 보고만 내고, 개입 여부는 이 정책으로 코드가 판정한다.
+
+[roles]
+# 값은 [agents.*] 이름. implementer는 test_author·reviewer와 달라야 한다(순환 방지).
+decomposer  = "claude"
+spec_a      = "claude"
+spec_b      = "codex"     # spec_a와 다른 모델이어야 해석 발산 신호가 의미 있다
+reconciler  = "claude"
+test_author = "codex"
+implementer = "claude"
+reviewer    = "codex"
+
+[budget]
+implement_iterations = 5    # 구현→검증 반복 상한
+review_rounds        = 2    # 리뷰 지적→재구현 왕복 상한
+same_failure_limit   = 3    # 같은 실패 시그니처가 연속 N번 → 진척 없음
+tamper_limit         = 2    # 테스트 수정 시도 N번 → 에스컬레이션
+per_call_usd         = 2.0  # claude --max-budget-usd
+call_timeout_sec     = 1800
+
+[verify]
+test       = "python3 -m unittest discover -s tests -t ."
+checks     = []             # 예: ["ruff check .", "mypy ."]
+mutation   = ""             # 예: "mutmut run --paths-to-mutate {changed}". 비우면 생략, 결과는 리뷰어와 리포트에만 전달
+flaky_runs = 1              # 2 이상이면 반복 실행해서 결과가 갈리면 flaky로 실패 처리
+
+[paths]
+tests = ["tests/**", "**/test_*.py", "**/*_test.py", "**/*.test.ts", "**/*.spec.ts", "**/*_test.go"]
+
+# 변경 파일의 tier. 위에서부터 첫 매치, 매치 없으면 tier 1.
+[[paths.tier]]
+tier  = 3
+globs = [".env*", "**/secrets/**", "deploy/**", "infra/**"]
+
+[[paths.tier]]
+tier  = 2
+globs = ["**/migrations/**", ".github/**", "package.json", "pyproject.toml", "**/auth/**", "**/api/public/**"]
+
+[gate]
+approve_from_tier   = 2     # 이 tier 이상 변경은 사람 승인
+allow_uncovered_acs = false # 테스트가 없는 AC가 남아 있으면 사람 승인
+
+[triage]
+# 이 태그가 하나라도 붙고 reversible=false면 개별 판정으로 바로 질문
+escalate_tags = ["public_api", "schema", "data", "user_visible", "security"]
+# 과제 단위 애매함 점수 = auto로 남은 가정들의 점수 합
+weights = { public_api = 3, schema = 3, data = 3, security = 3, user_visible = 2, internal = 0.5 }
+irreversible_multiplier = 2
+
+# 작업 유형별 사전값: oracle이 강할수록 자율 범위가 넓다.
+[task_types.bugfix]
+require_red            = true   # 재현 테스트가 구현 전 실패해야 함
+existing_tests_mutable = false
+score_threshold        = 6
+
+[task_types.refactor]
+require_red            = false  # 동작 보존: 테스트가 처음부터 통과해야 함
+existing_tests_mutable = false
+score_threshold        = 4
+
+[task_types.feature_change]
+require_red            = true
+existing_tests_mutable = true   # 단, 수정마다 AC 연결이 있어야 하고 assertion 약화는 차단
+score_threshold        = 6
+
+[task_types.feature_new]
+require_red            = true
+existing_tests_mutable = false
+score_threshold        = 8
+
+[agents.claude]
+model           = ""            # 비우면 CLI 기본값
+permission_mode = "dontAsk"     # allowlist 밖 도구는 거부된다(permission_denials로 기록)
+read_tools      = ["Read", "Glob", "Grep"]
+write_tools     = ["Read", "Glob", "Grep", "Edit", "Write",
+                   "Bash(python3 -m unittest*)", "Bash(git diff*)", "Bash(git status*)"]
+resume          = true
+
+[agents.codex]
+model  = ""
+# `codex exec resume`는 -s/-C를 받지 않는다. sandbox·cwd가 어떻게 유지되는지 확인 전까지 끔.
+# 꺼져 있으면 매 반복을 새 세션 + 디스크 상태(스펙·diff·실패 로그)로 시작한다.
+resume = false
