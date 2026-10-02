@@ -28,6 +28,13 @@ def tier_of(path: str, policy: dict) -> int:
     return 1
 
 
+def role(policy: dict, name: str, attempt: int = 1) -> dict:
+    """역할의 agent·model·effort. ladder가 있으면 attempt번째 단계를 쓰고, 넘치면 마지막 단계."""
+    r = policy["roles"][name]
+    step = r["ladder"][min(attempt, len(r["ladder"])) - 1] if "ladder" in r else r
+    return {"agent": r["agent"], "model": step.get("model", ""), "effort": step.get("effort", "")}
+
+
 def item_score(item: dict, policy: dict) -> float:
     t = policy["triage"]
     base = max((t["weights"].get(tag, 1) for tag in item["touches"]), default=1)

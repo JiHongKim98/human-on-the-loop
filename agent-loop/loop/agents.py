@@ -20,6 +20,8 @@ class Call:
     workdir: Path            # schema·출력 임시 파일을 둘 곳(과제 디렉터리)
     write: bool = False
     session: str | None = None  # None: 무상태 1회성, "new": 이어갈 세션 시작, 그 외: 이어갈 세션 id
+    model: str = ""             # 비우면 CLI 전역 기본값
+    effort: str = ""
 
 
 @dataclass
@@ -43,8 +45,10 @@ class ClaudeAgent:
         cmd = ["claude", "-p", "--output-format", "json", "--json-schema", json.dumps(call.schema),
                "--permission-mode", self.cfg["permission_mode"], "--allowedTools", ",".join(tools),
                "--max-budget-usd", str(self.budget["per_call_usd"])]
-        if self.cfg.get("model"):
-            cmd += ["--model", self.cfg["model"]]
+        if call.model:
+            cmd += ["--model", call.model]
+        if call.effort:
+            cmd += ["--effort", call.effort]
         sid = None
         if call.session == "new":
             sid = str(uuid.uuid4())
@@ -83,8 +87,10 @@ class CodexAgent:
         sandbox = "workspace-write" if call.write else "read-only"
         common = ["--json", "--output-schema", str(schema_file), "-o", str(out_file),
                   "-c", 'approval_policy="never"']
-        if self.cfg.get("model"):
-            common += ["-m", self.cfg["model"]]
+        if call.model:
+            common += ["-m", call.model]
+        if call.effort:
+            common += ["-c", f'model_reasoning_effort="{call.effort}"']
 
         if call.session and call.session != "new":
             # 미검증: resume은 -s/-C를 받지 않아 config override로 sandbox를 넘긴다

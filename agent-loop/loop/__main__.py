@@ -122,6 +122,16 @@ def stats(ledger):
     print(f"놓친 질문 (auto 가정을 사람이 뒤집음): {rate(sum(bool(i.get('overridden')) for i in auto), len(auto))}  → 높으면 triage를 빡빡하게")
     print(f"막힌 이유: {dict(blocks)}")
     print(f"비용(claude 보고분): ${cost:.2f}")
+    print("역할별 호출 (agent model/effort: 횟수, 비용):")
+    by_role = Counter()
+    role_cost = Counter()
+    for e in ledger.events():
+        if e["kind"] == "call":
+            key = (e["role"], f"{e.get('agent')} {e.get('model') or '기본값'}/{e.get('effort') or '기본값'}")
+            by_role[key] += 1
+            role_cost[key] += e.get("cost") or 0
+    for (role, setting), n in sorted(by_role.items()):
+        print(f"  {role:<12} {setting:<28} {n}회  ${role_cost[(role, setting)]:.2f}")
 
 
 def print_task(t):

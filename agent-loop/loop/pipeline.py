@@ -24,17 +24,18 @@ class Loop:
         self.policy, self.ledger, self.agents = policy, ledger, agents
         roles = policy["roles"]
         for other in ("test_author", "reviewer"):
-            if roles[other] == roles["implementer"]:
-                raise ValueError(f"roles.{other}와 roles.implementer가 같은 모델이면 검증이 순환한다")
+            if roles[other]["agent"] == roles["implementer"]["agent"]:
+                raise ValueError(f"roles.{other}와 roles.implementer가 같은 agent면 검증이 순환한다")
 
     # ── 진입점 ────────────────────────────────────────────────
 
     def decompose(self, repo: Path, agenda: str) -> list[dict]:
         tmp = self.ledger.home / "tmp"
         tmp.mkdir(exist_ok=True)
-        agent = self.agents[self.policy["roles"]["decomposer"]]
+        rc = pol.role(self.policy, "decomposer")
         try:
-            r = agent.run(Call("decomposer", prompts.decompose(agenda), schemas.DECOMPOSE, repo, tmp))
+            r = self.agents[rc["agent"]].run(Call("decomposer", prompts.decompose(agenda), schemas.DECOMPOSE, repo, tmp,
+                                                  model=rc["model"], effort=rc["effort"]))
         except AgentError as e:
             raise SystemExit(f"decomposer 실패: {e}")
         return [self.ledger.new_task(repo=str(repo), agenda=agenda, **t) for t in r.data["tasks"]]
@@ -58,15 +59,17 @@ class Loop:
 
     # ── 공통 ──────────────────────────────────────────────────
 
-    def call(self, task, role, prompt, schema, *, cwd, write=False, session=None):
-        agent = self.agents[self.policy["roles"][role]]
-        call = Call(role, prompt, schema, Path(cwd), self.ledger.task_dir(task["id"]), write, session)
+    def call(self, task, role, prompt, schema, *, cwd, write=False, session=None, attempt=1):
+        rc = pol.role(self.policy, role, attempt)
+        agent = self.agents[rc["agent"]]
+        call = Call(role, prompt, schema, Path(cwd), self.ledger.task_dir(task["id"]), write, session,
+                    rc["model"], rc["effort"])
         try:
             r = agent.run(call)
         except AgentError as e:
-            self.ledger.event(task, "agent_error", role=role, agent=agent.name, error=str(e)[:2000])
-            raise Blocked("agent_error", f"{role}({agent.name}): {e}")
-        self.ledger.event(task, "call", role=role, agent=agent.name, cost=r.cost, denials=r.denials)
+            self.ledger.event(task, "agent_error", role=role, **rc, error=str(e)[:2000])
+            raise Blocked("agent_error", f"{role}({rc['agent']} {rc['model']}/{rc['effort']}): {e}")
+        self.ledger.event(task, "call", role=role, **rc, attempt=attempt, cost=r.cost, denials=r.denials)
         return r
 
     def wt(self, task) -> Path:
@@ -111,8 +114,8 @@ class Loop:
             fa = ex.submit(self.call, task, "spec_a", prompts.spec(task), schemas.SPEC, cwd=cwd)
             fb = ex.submit(self.call, task, "spec_b", prompts.spec(task), schemas.SPEC, cwd=cwd)
             a, b = fa.result().data, fb.result().data
-        if roles["spec_a"] == roles["spec_b"]:
-            self.ledger.event(task, "warning", msg="spec_a와 spec_b가 같은 모델: 발산 신호가 약하다")
+        if roles["spec_a"]["agent"] == roles["spec_b"]["agent"]:
+            self.ledger.event(task, "warning", msg="spec_a와 spec_b가 같은 agent: 발산 신호가 약하다")
         m = self.call(task, "reconciler", prompts.reconcile(task, a, b), schemas.RECONCILE, cwd=cwd).data
         task["spec"] = {k: m[k] for k in ("summary", "acceptance_criteria", "interface_changes")}
         items = [{**x, "id": f"S-{x['id']}", "source": "assumption"} for x in m["assumptions"]]
@@ -169,7 +172,7 @@ class Loop:
 
     def stage_implement(self, task):
         wt, b = self.wt(task), self.policy["budget"]
-        agent = self.agents[self.policy["roles"]["implementer"]]
+        agent = self.agents[pol.role(self.policy, "implementer")["agent"]]
         while task["iterations"] < b["implement_iterations"]:
             task["iterations"] += 1
             sess = task["sessions"].get("implementer")
@@ -178,7 +181,8 @@ class Loop:
             else:
                 prompt, session = prompts.implement(task), ("new" if agent.supports_resume else None)
             task["feedback"] = []
-            r = self.call(task, "implementer", prompt, schemas.IMPLEMENT, cwd=wt, write=True, session=session)
+            r = self.call(task, "implementer", prompt, schemas.IMPLEMENT, cwd=wt, write=True, session=session,
+                          attempt=task["iterations"])  # 실패할수록 ladder 단계가 올라간다
             if r.session:
                 task["sessions"]["implementer"] = r.session
 

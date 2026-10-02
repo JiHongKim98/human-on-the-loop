@@ -34,10 +34,11 @@ class FakeAgent:
     def __init__(self, name, impl_scripts, tests_content=TEST_DIV):
         self.name, self.supports_resume = name, True
         self.impl_scripts, self.tests_content = list(impl_scripts), tests_content
-        self.calls = []
+        self.calls, self.settings = [], []
 
     def run(self, call):
         self.calls.append((call.role, call.session))
+        self.settings.append((call.role, call.model, call.effort))
         wt = Path(call.cwd)
         match call.role:
             case "spec_a" | "spec_b":
@@ -114,8 +115,12 @@ class PipelineTest(unittest.TestCase):
         wt = Path(t["worktree"])
         self.assertEqual((wt / "tests" / "test_div.py").read_text(), TEST_DIV)  # 약화 시도는 되돌려짐
         self.assertTrue((self.ledger.task_dir(t["id"]) / "report.md").exists())
-        # 두 번째 구현 호출은 첫 세션을 이어받는다
+        # 두 번째 구현 호출은 첫 세션을 이어받고, ladder 다음 단계로 올라간다
         self.assertEqual([s for r, s in fake.calls if r == "implementer"], ["new", "sess-1"])
+        ladder = [(s["model"], s["effort"]) for s in self.policy["roles"]["implementer"]["ladder"]]
+        self.assertEqual([(m, e) for r, m, e in fake.settings if r == "implementer"], ladder[:2])
+        spec_b = self.policy["roles"]["spec_b"]
+        self.assertIn(("spec_b", spec_b["model"], spec_b["effort"]), fake.settings)
 
     def test_tier2_change_needs_approval(self):
         loop, _ = self.loop([{"calc.py": GOOD, "migrations/001.sql": "alter table x;"}])
@@ -155,6 +160,12 @@ class PolicyTest(unittest.TestCase):
         items = [{"id": f"x{n}", "touches": ["user_visible"], "reversible": True} for n in range(5)]  # 각 2점, 합 10
         pol.triage(items, "feature_new", self.policy)  # threshold 8
         self.assertEqual(sum(i["decision"] == "escalated" for i in items), 1)
+
+    def test_role_ladder_clamps_to_last_step(self):
+        ladder = self.policy["roles"]["implementer"]["ladder"]
+        self.assertEqual(pol.role(self.policy, "implementer", 1)["effort"], ladder[0]["effort"])
+        self.assertEqual(pol.role(self.policy, "implementer", 99)["model"], ladder[-1]["model"])
+        self.assertEqual(pol.role(self.policy, "reviewer")["agent"], "codex")
 
     def test_tiers_and_tests(self):
         self.assertEqual(pol.tier_of("db/migrations/001.sql", self.policy), 2)
