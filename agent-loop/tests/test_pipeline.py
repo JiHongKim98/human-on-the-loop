@@ -153,6 +153,25 @@ class PipelineTest(unittest.TestCase):
         self.answer(tid, "S-A1")
 
 
+class SubscriptionGuardTest(unittest.TestCase):
+    def test_billed_auth_env_is_stripped(self):
+        from unittest import mock
+        from loop import agents
+        with mock.patch.dict("os.environ", {"ANTHROPIC_API_KEY": "x", "CODEX_API_KEY": "y", "KEEP": "1"}):
+            env = agents.subscription_env()
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertNotIn("CODEX_API_KEY", env)
+        self.assertEqual(env["KEEP"], "1")
+
+    def test_api_key_login_is_refused(self):
+        from unittest import mock
+        from loop import agents
+        fake = mock.Mock(stdout='{"authMethod": "api_key"}', stderr="")
+        with mock.patch.object(agents.subprocess, "run", return_value=fake):
+            with self.assertRaises(SystemExit):
+                agents.check_subscription()
+
+
 class PolicyTest(unittest.TestCase):
     policy = pol.load(ROOT / "policy.toml")
 

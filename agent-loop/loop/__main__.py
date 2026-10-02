@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from . import policy as pol
-from .agents import make_agents
+from .agents import check_subscription, make_agents
 from .ledger import Ledger
 from .pipeline import Loop
 
@@ -44,17 +44,19 @@ def main(argv=None):
 
     policy = pol.load(args.policy)
     ledger = Ledger(args.home)
-    loop = lambda: Loop(policy, ledger, make_agents(policy))  # noqa: E731 — 조회 명령은 에이전트 없이
+    def loop():  # 에이전트를 띄우는 명령만 구독 로그인 확인을 거친다
+        check_subscription()
+        return Loop(policy, ledger, make_agents(policy))
 
     match args.cmd:
         case "run":
             repo = args.repo.resolve()
+            lp = loop()
             if args.task:
                 tasks = [ledger.new_task(repo=str(repo), agenda=args.agenda, type=args.task,
                                          title=args.title or args.agenda[:60], description=args.agenda)]
             else:
-                tasks = loop().decompose(repo, args.agenda)
-            lp = loop()
+                tasks = lp.decompose(repo, args.agenda)
             for t in tasks:
                 print_task(lp.run(t["id"]))
         case "status":
@@ -121,7 +123,7 @@ def stats(ledger):
     print(f"불필요한 질문 (사람이 에이전트 선택을 그대로 수락): {rate(sum(i['accepted_default'] for i in esc), len(esc))}  → 높으면 triage를 느슨하게")
     print(f"놓친 질문 (auto 가정을 사람이 뒤집음): {rate(sum(bool(i.get('overridden')) for i in auto), len(auto))}  → 높으면 triage를 빡빡하게")
     print(f"막힌 이유: {dict(blocks)}")
-    print(f"비용(claude 보고분): ${cost:.2f}")
+    print(f"사용량 환산(claude 보고분, 정가 기준 추정이며 구독에서는 청구되지 않음): ${cost:.2f}")
     print("역할별 호출 (agent model/effort: 횟수, 비용):")
     by_role = Counter()
     role_cost = Counter()

@@ -53,7 +53,7 @@ implement_iterations = 5    # 구현→검증 반복 상한
 review_rounds        = 2    # 리뷰 지적→재구현 왕복 상한
 same_failure_limit   = 3    # 같은 실패 시그니처가 연속 N번 → 진척 없음
 tamper_limit         = 2    # 테스트 수정 시도 N번 → 에스컬레이션
-per_call_usd         = 2.0  # claude --max-budget-usd
+per_call_usd         = 2.0  # claude --max-budget-usd. 구독에서는 청구액이 아니라 정가 환산 사용량 상한으로 동작한다
 call_timeout_sec     = 1800
 
 [verify]

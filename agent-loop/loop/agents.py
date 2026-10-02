@@ -1,14 +1,44 @@
-"""Claude / Codex headless 어댑터. 설정은 전부 호출 플래그로 넘기고 ~/.claude, ~/.codex 설정 파일은 건드리지 않는다."""
+"""Claude / Codex headless 어댑터. 설정은 전부 호출 플래그로 넘기고 ~/.claude, ~/.codex 설정 파일은 건드리지 않는다.
+
+구독 요금제 전용: API 키 계열 환경변수가 자식 프로세스로 넘어가면 CLI가 종량 과금 인증으로 바뀔 수 있으므로
+호출마다 지우고, 실행 전에 두 CLI가 구독 계정으로 로그인돼 있는지 확인한다.
+"""
 
 import json
+import os
 import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+# 하나라도 있으면 구독 대신 API·클라우드 과금 경로로 인증될 수 있다
+BILLED_AUTH_ENV = (
+    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS", "OPENAI_API_KEY", "CODEX_API_KEY",
+)
+
 
 class AgentError(Exception):
     pass
+
+
+def subscription_env() -> dict:
+    return {k: v for k, v in os.environ.items() if k not in BILLED_AUTH_ENV}
+
+
+def check_subscription() -> None:
+    """두 CLI가 구독 로그인 상태가 아니면 아무것도 실행하지 않고 멈춘다."""
+    env = subscription_env()
+    p = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True, env=env)
+    try:
+        method = json.loads(p.stdout).get("authMethod")
+    except json.JSONDecodeError:
+        method = None
+    if method != "claude.ai":
+        raise SystemExit(f"claude가 구독(claude.ai) 로그인이 아니다: authMethod={method}. 실행하지 않는다.")
+    p = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, env=env)
+    if "ChatGPT" not in p.stdout + p.stderr:
+        raise SystemExit("codex가 ChatGPT 로그인이 아니다. 실행하지 않는다.")
 
 
 @dataclass
@@ -115,7 +145,7 @@ class CodexAgent:
 
 def _run(cmd, cwd, timeout) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=subscription_env())
     except subprocess.TimeoutExpired:
         raise AgentError(f"{cmd[0]} timeout after {timeout}s")
 
