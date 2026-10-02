@@ -145,7 +145,9 @@ class CodexAgent:
 
 def _run(cmd, cwd, timeout) -> subprocess.CompletedProcess:
     try:
-        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=subscription_env())
+        # stdin을 닫지 않으면 claude -p가 입력을 3초 기다린다
+        return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout,
+                              env=subscription_env(), stdin=subprocess.DEVNULL)
     except subprocess.TimeoutExpired:
         raise AgentError(f"{cmd[0]} timeout after {timeout}s")
 
